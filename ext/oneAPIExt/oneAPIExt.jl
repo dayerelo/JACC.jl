@@ -13,7 +13,7 @@ default_stream() = oneAPI.global_queue(oneAPI.context(), oneAPI.device())
 
 JACC.default_stream(::oneAPIBackend) = default_stream()
 
-function JACC.create_stream(::oneAPIBackend)
+function JACC.create_stream(::oneAPIBackend; priority = nothing)
     oneAPI.oneL0.ZeCommandQueue(oneAPI.context(), oneAPI.device())
 end
 

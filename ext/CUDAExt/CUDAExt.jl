@@ -14,7 +14,7 @@ default_stream() = CUDA.stream()
 
 JACC.default_stream(::CUDABackend) = default_stream()
 
-JACC.create_stream(::CUDABackend) = CUDA.CuStream()
+JACC.create_stream(::CUDABackend; priority = nothing) = CUDA.CuStream(; priority = priority)
 
 function JACC.synchronize(::CUDABackend; stream = default_stream())
     CUDA.synchronize(stream)

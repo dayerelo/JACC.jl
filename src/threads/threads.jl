@@ -32,7 +32,7 @@ JACC.synchronize(::ThreadsBackend) = nothing
 
 JACC.default_stream(::ThreadsBackend) = nothing
 
-JACC.create_stream(::ThreadsBackend) = nothing
+JACC.create_stream(::ThreadsBackend; priority = nothing) = nothing
 
 @inline function JACC.parallel_for(f, ::ThreadsBackend, N::Integer, x...; kw...)
     @maybe_threaded for i in 1:N

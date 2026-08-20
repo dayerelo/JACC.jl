@@ -35,7 +35,19 @@ ilog2(n::T) where {T <: Integer} = sizeof(T) * 8 - 1 - leading_zeros(n)
 
 default_stream() = default_stream(default_backend())
 
-create_stream() = create_stream(default_backend())
+"""
+    create_stream(; priority=nothing)
+
+Create a new backend stream. `priority` is an optional, backend-defined hint
+used to bias hardware scheduling between concurrently-running kernels on
+different streams (lower numeric value = higher priority, matching CUDA's own
+convention) — currently only honored on the CUDA backend
+(`CUDA.CuStream(; priority)`, i.e. `cuStreamCreateWithPriority`); every other
+backend accepts and silently ignores it, so code that sets `priority` runs
+unchanged (just without the scheduling hint) on backends that don't support
+the concept.
+"""
+create_stream(; kwargs...) = create_stream(default_backend(); kwargs...)
 
 @kwdef mutable struct LaunchSpec{Backend}
     stream = default_stream(Backend())
