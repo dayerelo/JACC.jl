@@ -203,10 +203,21 @@ end
 function _parallel_for(indexer::TI, f, spec::LaunchSpec{CUDABackend}, (m, n),
         (M, N), x...; name = nothing) where {TI}
     kargs = _kernel_args(indexer, (M, N), f, x...)
-    kernel, shmem_size = _kernel_maxshmem(_parallel_for_cuda_MN, kargs, name)
-
-    if spec.shmem_size < 0
-        spec.shmem_size = shmem_size
+    # See the 1D LaunchSpec parallel_for's own comment: reuse spec.kernel
+    # across repeated calls instead of unconditionally re-resolving it via
+    # cufunction (lock + two cache lookups) every launch. Both
+    # BlockIndexerBasic and BlockIndexerSwapped funnel through this same
+    # function on their repeated (spec already configured) calls, and the
+    # `isa` check below distinguishes them correctly since `indexer`'s own
+    # type is part of `kargs`'s type tuple.
+    p_tt = Tuple{Core.Typeof.(kargs)...}
+    kernel = spec.kernel
+    if !(kernel isa CUDA.HostKernel{typeof(_parallel_for_cuda_MN), p_tt})
+        kernel, shmem_size = _kernel_maxshmem(_parallel_for_cuda_MN, kargs, name)
+        spec.kernel = kernel
+        if spec.shmem_size < 0
+            spec.shmem_size = shmem_size
+        end
     end
 
     if spec.threads == 0
@@ -289,9 +300,21 @@ function JACC.parallel_for(
         f, spec::LaunchSpec{CUDABackend}, (L, M, N)::NTuple{3, Integer}, x...;
         name = nothing)
     kargs = _kernel_args((L, M, N), f, x...)
-    kernel, shmem_size = _kernel_maxshmem(_parallel_for_cuda_LMN, kargs, name)
-    if spec.shmem_size < 0
-        spec.shmem_size = shmem_size
+    # See the 1D LaunchSpec parallel_for's own comment: reuse spec.kernel
+    # across repeated calls instead of unconditionally re-resolving it via
+    # cufunction (lock + two cache lookups) every launch. This is the path
+    # a 3D range-tuple `parallel_for(f, spec, range::NTuple{3,AbstractRange},
+    # ...)` call lands on (via `length.(range)`) — e.g. BLAST's
+    # `performance.halo.overlap` 6-face + interior kernels, each launched
+    # on its own persistent LaunchSpec every iteration.
+    p_tt = Tuple{Core.Typeof.(kargs)...}
+    kernel = spec.kernel
+    if !(kernel isa CUDA.HostKernel{typeof(_parallel_for_cuda_LMN), p_tt})
+        kernel, shmem_size = _kernel_maxshmem(_parallel_for_cuda_LMN, kargs, name)
+        spec.kernel = kernel
+        if spec.shmem_size < 0
+            spec.shmem_size = shmem_size
+        end
     end
     if spec.threads == 0
         numThreads = 32
