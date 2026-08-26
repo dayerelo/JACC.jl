@@ -55,6 +55,15 @@ create_stream(; kwargs...) = create_stream(default_backend(); kwargs...)
     blocks = 0
     shmem_size::Int = -1
     sync::Bool = true
+    # Backend-defined cache slot for whatever "already resolved, ready to
+    # launch" kernel object a backend's own parallel_for method wants to
+    # remember across repeated calls on this SAME spec — e.g. a CUDA
+    # `HostKernel`. `nothing` until the first call; a backend that has no
+    # such concept (or doesn't opt into caching) simply never touches this
+    # field. Loosely typed (like `stream`/`threads`/`blocks` above) since
+    # the concrete type is backend-specific and this struct isn't
+    # parametrized on it.
+    kernel = nothing
 end
 
 launch_spec(; kw...) = LaunchSpec{typeof(default_backend())}(; kw...)

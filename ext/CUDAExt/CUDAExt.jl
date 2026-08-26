@@ -61,12 +61,49 @@ function JACC.parallel_for(f, ::CUDABackend, N::Integer, x...; name = nothing)
     CUDA.synchronize()
 end
 
+"""
+`spec.kernel` caches the resolved `CUDA.HostKernel` across repeated calls
+on the SAME `LaunchSpec` — a real, measured cost for any caller that
+issues many small launches on the same spec every iteration (e.g. BLAST's
+self-wrap halo relay): every call otherwise goes through `cufunction`
+(`CUDA.jl/src/compiler/execution.jl`), which unconditionally acquires a
+process-wide `ReentrantLock` and does two nested cache lookups (a
+`methodinstance`/`GPUCompiler.cached_compilation` lookup, then a
+`Dict{Any,Any}` lookup keyed by `(objectid(source), hash(fun), f)`) before
+returning the already-compiled kernel — none of which a native CUDA C++
+`kernel<<<...>>>(...)` call ever pays, since nvcc resolves "which compiled
+kernel" at compile time instead of re-deriving it on the host every
+launch. That lock+lookup is genuinely non-overlappable host-side latency:
+it happens before the kernel is even enqueued to its stream, so N calls on
+N different streams still pay it N times, serialized, regardless of how
+well the resulting kernels run concurrently on the device.
+
+Correctness: `spec.kernel` is only reused when it's still a `HostKernel`
+for the EXACT `(f, argument-type-tuple)` this call is about to launch —
+checked via a plain `isa` against the concrete parametric `HostKernel{F,tt}`
+type, which is a cheap local type comparison (no lock, no global `Dict`),
+not a "trust the caller" shortcut. A spec that's reused across genuinely
+different kernel functions or argument-type shapes (unusual, but not
+disallowed) still recompiles correctly on a type mismatch — it just loses
+the caching benefit for that spec, exactly as if this field didn't exist.
+
+Note this only removes the KERNEL-RESOLUTION cost. `_kernel_args`
+(`cudaconvert.(args)`, computing `p_tt`) still runs every call — the
+argument VALUES genuinely change every launch (a new `f`, new per-call
+data), only the compiled kernel object is invariant across calls on the
+same spec.
+"""
 function JACC.parallel_for(f, spec::LaunchSpec{CUDABackend}, N::Integer, x...;
         name = nothing)
     kargs = _kernel_args(N, f, x...)
-    kernel, shmem_size = _kernel_maxshmem(_parallel_for_cuda, kargs, name)
-    if spec.shmem_size < 0
-        spec.shmem_size = shmem_size
+    p_tt = Tuple{Core.Typeof.(kargs)...}
+    kernel = spec.kernel
+    if !(kernel isa CUDA.HostKernel{typeof(_parallel_for_cuda), p_tt})
+        kernel, shmem_size = _kernel_maxshmem(_parallel_for_cuda, kargs, name)
+        spec.kernel = kernel
+        if spec.shmem_size < 0
+            spec.shmem_size = shmem_size
+        end
     end
     if spec.threads == 0
         config = CUDA.launch_configuration(kernel.fun; shmem = spec.shmem_size)
