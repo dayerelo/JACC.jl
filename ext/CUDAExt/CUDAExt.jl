@@ -330,7 +330,7 @@ function JACC.parallel_for(
         spec.blocks = (Lblocks, Mblocks, Nblocks)
     end
     kernel(kargs...; threads = spec.threads, blocks = spec.blocks,
-        shmem = spec.shmem_size)
+        shmem = spec.shmem_size, stream = spec.stream)
     if spec.sync
         CUDA.synchronize(spec.stream)
     end
